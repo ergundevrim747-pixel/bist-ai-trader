@@ -10,35 +10,41 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
+      - name: GitHub deposunu indir
         uses: actions/checkout@v4
 
-      - name: Extract V2 project
+      - name: V2 ZIP dosyasını çıkar
         run: |
-          unzip -q "BIST_AI_Trader_Android_Studio_Project.zip" -d project
+          unzip -q "BIST_AI_Trader_v2_FIXED.zip" -d project
 
-      - name: Set up JDK
-        uses: actions/setup-java@v4
+      - name: Java 17 kur
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "17"
 
-      - name: Install Android SDK
+      - name: Android SDK lisanslarını kabul et
         run: |
           yes | ${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager --licenses || true
-          ${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager "platforms;android-35" "build-tools;35.0.0"
 
-      - name: Set up Gradle
+      - name: Android SDK paketlerini kur
+        run: |
+          ${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager \
+            "platforms;android-35" \
+            "build-tools;35.0.0"
+
+      - name: Gradle kur
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "8.10.2"
 
-      - name: Build V2 APK
+      - name: V2 APK oluştur
         working-directory: project
-        run: gradle :app:assembleDebug --stacktrace
+        run: |
+          gradle :app:assembleDebug --stacktrace
 
-      - name: Upload APK
+      - name: APK'yı yükle
         uses: actions/upload-artifact@v4
         with:
-          name: BIST-AI-Trader-V2
+          name: BIST-AI-Trader-V2-APK
           path: project/app/build/outputs/apk/debug/app-debug.apk

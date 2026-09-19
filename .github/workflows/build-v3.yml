@@ -13,24 +13,29 @@ jobs:
 
     steps:
 
+      # 1. Repository'yi indir
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Extract V3 FIX project
+      # 2. V3 FIX2 Android projesini çıkart
+      - name: Extract V3 FIX2 project
         run: |
           rm -rf project
-          unzip -q "BIST_AI_Trader_V3_FIX.zip" -d project
+          unzip -q "BIST_AI_Trader_V3_FIX2.zip" -d project
 
+      # 3. Java 17
       - name: Set up JDK
         uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "17"
 
+      # 4. Android SDK lisanslarını kabul et
       - name: Accept Android SDK licenses
         run: |
           yes | ${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager --licenses || true
 
+      # 5. Android SDK paketlerini yükle
       - name: Install Android SDK
         run: |
           ${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager \
@@ -38,19 +43,22 @@ jobs:
             "platforms;android-35" \
             "build-tools;35.0.0"
 
+      # 6. Gradle 8.10.2
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "8.10.2"
 
-      - name: Build V3 FIX APK
+      # 7. APK'yı derle
+      - name: Build V3 FIX2 APK
         working-directory: project
         run: |
           gradle :app:assembleDebug --stacktrace
 
+      # 8. APK'yı yükle
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: BIST-AI-Trader-V3-FIX-APK
+          name: BIST-AI-Trader-V3-FIX2-APK
           path: project/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error

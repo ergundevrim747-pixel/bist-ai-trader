@@ -15,178 +15,161 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
+
+      # ---------------------------------------------------------
+      # 1. GitHub repository
+      # ---------------------------------------------------------
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: JDK 17
+
+      # ---------------------------------------------------------
+      # 2. Java 17
+      # ---------------------------------------------------------
+      - name: Set up JDK 17
         uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "17"
 
-      - name: Android SDK
+
+      # ---------------------------------------------------------
+      # 3. Android SDK
+      # ---------------------------------------------------------
+      - name: Accept Android SDK licenses
         run: |
           yes | "${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager" --licenses || true
+
+
+      - name: Install Android SDK
+        run: |
           "${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager" \
             "platform-tools" \
             "platforms;android-35" \
             "build-tools;35.0.0"
 
-      - name: Gradle
+
+      # ---------------------------------------------------------
+      # 4. Gradle
+      # ---------------------------------------------------------
+      - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "8.10.2"
 
-      - name: Extract project
+
+      # ---------------------------------------------------------
+      # 5. V3.5 ZIP dosyasını aç
+      # ---------------------------------------------------------
+      - name: Extract V3.5 project
         run: |
           rm -rf project
-          mkdir project
+          mkdir -p project
 
-          unzip -q \
-            BIST_AI_Trader_V3_5_SELF_LEARNING_CONTINUOUS.zip \
-            -d project
-
-      - name: Locate project
-        run: |
-          if [ -f project/settings.gradle ] || [ -f project/settings.gradle.kts ]; then
-            echo "PROJECT_DIR=project" >> "$GITHUB_ENV"
-          else
-            SETTINGS=$(find project -name settings.gradle -o -name settings.gradle.kts | head -1)
-
-            if [ -z "$SETTINGS" ]; then
-              echo "Android projesi bulunamadı!"
-              exit 1
-            fi
-
-            echo "PROJECT_DIR=$(dirname "$SETTINGS")" >> "$GITHUB_ENV"
+          if [ ! -f "BIST_AI_Trader_V3_5_SELF_LEARNING_CONTINUOUS.zip" ]; then
+            echo "V3.5 ZIP bulunamadı!"
+            echo ""
+            echo "Repository içeriği:"
+            find . -maxdepth 3 -type f | sort
+            exit 1
           fi
 
-      # =========================================================
-      # PredictionStore.java - JSONException FIX
-      # =========================================================
+          unzip -q \
+            "BIST_AI_Trader_V3_5_SELF_LEARNING_CONTINUOUS.zip" \
+            -d project
 
-      - name: Fix PredictionStore
+          echo "ZIP başarıyla açıldı."
+
+
+      # ---------------------------------------------------------
+      # 6. Android projesini bul
+      # ---------------------------------------------------------
+      - name: Locate Android project
         run: |
-          python3 <<'PY'
-          from pathlib import Path
-          import re
+          echo "Project contents:"
+          find project -maxdepth 5 -type f | sort | head -300
 
-          files = list(Path("project").rglob("PredictionStore.java"))
+          if [ -f "project/settings.gradle" ] || [ -f "project/settings.gradle.kts" ]; then
+            echo "PROJECT_DIR=project" >> "$GITHUB_ENV"
+            exit 0
+          fi
 
-          if not files:
-              print("PredictionStore.java bulunamadı!")
-              raise SystemExit(1)
+          SETTINGS=$(find project -maxdepth 5 \
+            -name "settings.gradle" -o -name "settings.gradle.kts" \
+            -print -quit)
 
-          path = files[0]
+          if [ -z "$SETTINGS" ]; then
+            echo "settings.gradle bulunamadı!"
+            exit 1
+          fi
 
-          print("Düzeltilen dosya:")
-          print(path)
+          PROJECT_DIR=$(dirname "$SETTINGS")
 
-          text = path.read_text(encoding="utf-8")
+          echo "Android proje klasörü: $PROJECT_DIR"
 
-          # -----------------------------------------------------
-          # 1. JSONException import'u garanti et
-          # -----------------------------------------------------
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
 
-          if "import org.json.JSONException;" not in text:
-              text = text.replace(
-                  "import org.json.JSONObject;",
-                  "import org.json.JSONObject;\nimport org.json.JSONException;"
-              )
 
-          # -----------------------------------------------------
-          # 2. write/update yapan metodun içine try/catch eklemek
-          # -----------------------------------------------------
-
-          # Sorunlu p.put(...) satırlarını tek tek güvenli hale getir.
-          replacements = {
-              r'p\.put"lastQuote",\s*price;':
-                  'try { p.put("lastQuote", price); } catch (JSONException ignored) {}',
-
-              r'p\.put"lastQuoteTime",\s*now;':
-                  'try { p.put("lastQuoteTime", now); } catch (JSONException ignored) {}',
-
-              r'p\.put"maxFavPct",\s*Math\.max\((.*?);':
-                  r'try { p.put("maxFavPct", Math.max(\1); } catch (JSONException ignored) {}',
-
-              r'p\.put"maxAdvPct",\s*Math\.min\((.*?);':
-                  r'try { p.put("maxAdvPct", Math.min(\1); } catch (JSONException ignored) {}'
-          }
-
-          for pattern, replacement in replacements.items():
-              text = re.sub(pattern, replacement, text)
-
-          # -----------------------------------------------------
-          # 3. Eğer hâlâ optString/optDouble değil put() problemi
-          #    varsa bütün p.put çağrılarını güvenli hale getir.
-          # -----------------------------------------------------
-
-          lines = text.splitlines()
-
-          fixed = []
-
-          for line in lines:
-              stripped = line.strip()
-
-              if "p.put(" in stripped and "try {" not in stripped:
-                  indent = line[:len(line)-len(line.lstrip())]
-
-                  # Basit tek satırlık p.put()
-                  if stripped.endswith(";"):
-                      statement = stripped
-
-                      fixed.append(
-                          indent +
-                          "try { " +
-                          statement +
-                          " } catch (JSONException ignored) {}"
-                      )
-                      continue
-
-              fixed.append(line)
-
-          text = "\n".join(fixed) + "\n"
-
-          path.write_text(text, encoding="utf-8")
-
-          print("PredictionStore düzeltmesi uygulandı.")
-
-          PY
-
-      # =========================================================
-      # Dosyayı göster - hatanın gerçekten düzeldiğini kontrol et
-      # =========================================================
-
-      - name: Show PredictionStore
-        run: |
-          echo "========================================"
-          echo "PredictionStore.java"
-          echo "========================================"
-
-          sed -n '55,85p' \
-            project/app/src/main/java/com/bistaitrader/PredictionStore.java
-
-          echo "========================================"
-
+      # ---------------------------------------------------------
+      # 7. Gradle wrapper
+      # ---------------------------------------------------------
       - name: Prepare Gradle
         working-directory: ${{ env.PROJECT_DIR }}
         run: |
           if [ -f "./gradlew" ]; then
             chmod +x ./gradlew
-          fi
-
-      - name: Clean
-        working-directory: ${{ env.PROJECT_DIR }}
-        run: |
-          if [ -f "./gradlew" ]; then
-            ./gradlew clean --stacktrace --no-daemon
+            echo "Gradle wrapper bulundu."
           else
-            gradle clean --stacktrace --no-daemon
+            echo "Gradle wrapper bulunamadı."
+            echo "Sistem Gradle kullanılacak."
           fi
 
-      - name: Build APK
-        working-directory: ${{ env.PROJECT_DIR }}
+
+      # ---------------------------------------------------------
+      # 8. PredictionStore JSONException düzeltmesi
+      # ---------------------------------------------------------
+      - name: Fix PredictionStore JSONException
         run: |
-          if [ -f "./gradlew" ]; then
-            ./gradlew :app:assembleDebug \
-             
+          python3 <<'PY'
+          from pathlib import Path
+
+          files = list(Path("project").rglob("PredictionStore.java"))
+
+          if not files:
+              print("PredictionStore.java bulunamadı.")
+              raise SystemExit(1)
+
+          path = files[0]
+
+          print("PredictionStore bulundu:")
+          print(path)
+
+          text = path.read_text(encoding="utf-8")
+
+          # JSONException import'u
+          if "import org.json.JSONException;" not in text:
+              if "import org.json.JSONObject;" in text:
+                  text = text.replace(
+                      "import org.json.JSONObject;",
+                      "import org.json.JSONObject;\nimport org.json.JSONException;"
+                  )
+              else:
+                  text = text.replace(
+                      "package com.bistaitrader;",
+                      "package com.bistaitrader;\n\nimport org.json.JSONException;"
+                  )
+
+          # -----------------------------------------------------
+          # p.put() çağrılarını güvenli hale getir
+          # -----------------------------------------------------
+
+          lines = text.splitlines()
+          result = []
+
+          for line in lines:
+              stripped = line.strip()
+
+              if "p.put(" in stripped and not stripped.startswith("try"):
+                  indent = line[:len(line) - len(line.lstrip())]
+
+                  if stripped.endswith(";"):

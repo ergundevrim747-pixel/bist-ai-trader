@@ -3,7 +3,9 @@ name: BIST AI Trader V3.5 - Build APK
 on:
   workflow_dispatch:
   push:
-    branches: [main, master]
+    branches:
+      - main
+      - master
 
 permissions:
   contents: read
@@ -20,8 +22,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+
           test -f "BIST_AI_Trader_V3_5_READY.zip"
+
           unzip -t "BIST_AI_Trader_V3_5_READY.zip" >/dev/null
+
           echo "Project archive OK"
 
       - name: Set up JDK 17
@@ -29,7 +34,6 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
-          cache: gradle
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
@@ -44,6 +48,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+
           sdkmanager \
             "platform-tools" \
             "platforms;android-35" \
@@ -58,43 +63,77 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+
           rm -rf project
           mkdir -p project
+
           unzip -q "BIST_AI_Trader_V3_5_READY.zip" -d project
+
           test -f project/settings.gradle
           test -f project/build.gradle
           test -f project/app/build.gradle
           test -f project/app/src/main/AndroidManifest.xml
+
           echo "Project structure OK"
 
-      - name: Preflight source checks
+      - name: Check Java source
         working-directory: project
         shell: bash
         run: |
           set -euo pipefail
+
           if grep -RIn --include='*.java' 'Locale\.TR' app/src/main/java; then
-            echo "ERROR: Unsupported Locale.TR reference found."
+            echo "ERROR: Locale.TR found"
             exit 1
           fi
+
           test -f app/src/main/java/com/bistaitrader/PredictionStore.java
-          grep -q 'putQuiet' app/src/main/java/com/bistaitrader/PredictionStore.java
+
+          grep -q 'putQuiet' \
+            app/src/main/java/com/bistaitrader/PredictionStore.java
+
           echo "Java preflight OK"
+
+      - name: Check Gradle configuration
+        working-directory: project
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "===== settings.gradle ====="
+          cat settings.gradle
+
+          echo "===== build.gradle ====="
+          cat build.gradle
+
+          echo "===== app/build.gradle ====="
+          cat app/build.gradle
 
       - name: Build debug APK
         working-directory: project
         shell: bash
         run: |
           set -euo pipefail
+
           gradle --version
-          gradle clean :app:assembleDebug --stacktrace --no-daemon
+
+          gradle clean :app:assembleDebug \
+            --stacktrace \
+            --no-daemon
 
       - name: Verify APK
         shell: bash
         run: |
           set -euo pipefail
+
           APK="project/app/build/outputs/apk/debug/app-debug.apk"
+
           test -s "$APK"
-          echo "APK created successfully"
+
+          echo "======================================"
+          echo "APK CREATED SUCCESSFULLY"
+          echo "======================================"
+
           ls -lh "$APK"
 
       - name: Upload APK

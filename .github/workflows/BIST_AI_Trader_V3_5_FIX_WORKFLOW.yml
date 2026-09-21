@@ -15,175 +15,178 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up JDK 17
+      - name: JDK 17
         uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "17"
 
-      - name: Accept Android SDK licenses
+      - name: Android SDK
         run: |
           yes | "${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager" --licenses || true
-
-      - name: Install Android SDK
-        run: |
           "${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager" \
             "platform-tools" \
             "platforms;android-35" \
             "build-tools;35.0.0"
 
-      - name: Set up Gradle
+      - name: Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "8.10.2"
 
-      - name: Extract V3.5 project
+      - name: Extract project
         run: |
           rm -rf project
-          mkdir -p project
+          mkdir project
 
-          if [ -f "BIST_AI_Trader_V3_5_SELF_LEARNING_CONTINUOUS.zip" ]; then
-            unzip -q "BIST_AI_Trader_V3_5_SELF_LEARNING_CONTINUOUS.zip" -d project
-          else
-            echo "V3.5 ZIP bulunamadı!"
-            echo "Repository içeriği:"
-            find . -maxdepth 3 -type f | sort
-            exit 1
-          fi
+          unzip -q \
+            BIST_AI_Trader_V3_5_SELF_LEARNING_CONTINUOUS.zip \
+            -d project
 
-      - name: Locate Android project
+      - name: Locate project
         run: |
-          echo "Project contents:"
-          find project -maxdepth 5 -type f | sort | head -300
-
-          if [ -f "project/settings.gradle" ] || [ -f "project/settings.gradle.kts" ]; then
+          if [ -f project/settings.gradle ] || [ -f project/settings.gradle.kts ]; then
             echo "PROJECT_DIR=project" >> "$GITHUB_ENV"
-            exit 0
+          else
+            SETTINGS=$(find project -name settings.gradle -o -name settings.gradle.kts | head -1)
+
+            if [ -z "$SETTINGS" ]; then
+              echo "Android projesi bulunamadı!"
+              exit 1
+            fi
+
+            echo "PROJECT_DIR=$(dirname "$SETTINGS")" >> "$GITHUB_ENV"
           fi
 
-          SETTINGS=$(find project -maxdepth 5 \
-            \( -name "settings.gradle" -o -name "settings.gradle.kts" \) \
-            -print -quit)
+      # =========================================================
+      # PredictionStore.java - JSONException FIX
+      # =========================================================
 
-          if [ -z "$SETTINGS" ]; then
-            echo "settings.gradle bulunamadı!"
-            exit 1
-          fi
+      - name: Fix PredictionStore
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+          import re
 
-          PROJECT_DIR=$(dirname "$SETTINGS")
-          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+          files = list(Path("project").rglob("PredictionStore.java"))
+
+          if not files:
+              print("PredictionStore.java bulunamadı!")
+              raise SystemExit(1)
+
+          path = files[0]
+
+          print("Düzeltilen dosya:")
+          print(path)
+
+          text = path.read_text(encoding="utf-8")
+
+          # -----------------------------------------------------
+          # 1. JSONException import'u garanti et
+          # -----------------------------------------------------
+
+          if "import org.json.JSONException;" not in text:
+              text = text.replace(
+                  "import org.json.JSONObject;",
+                  "import org.json.JSONObject;\nimport org.json.JSONException;"
+              )
+
+          # -----------------------------------------------------
+          # 2. write/update yapan metodun içine try/catch eklemek
+          # -----------------------------------------------------
+
+          # Sorunlu p.put(...) satırlarını tek tek güvenli hale getir.
+          replacements = {
+              r'p\.put"lastQuote",\s*price;':
+                  'try { p.put("lastQuote", price); } catch (JSONException ignored) {}',
+
+              r'p\.put"lastQuoteTime",\s*now;':
+                  'try { p.put("lastQuoteTime", now); } catch (JSONException ignored) {}',
+
+              r'p\.put"maxFavPct",\s*Math\.max\((.*?);':
+                  r'try { p.put("maxFavPct", Math.max(\1); } catch (JSONException ignored) {}',
+
+              r'p\.put"maxAdvPct",\s*Math\.min\((.*?);':
+                  r'try { p.put("maxAdvPct", Math.min(\1); } catch (JSONException ignored) {}'
+          }
+
+          for pattern, replacement in replacements.items():
+              text = re.sub(pattern, replacement, text)
+
+          # -----------------------------------------------------
+          # 3. Eğer hâlâ optString/optDouble değil put() problemi
+          #    varsa bütün p.put çağrılarını güvenli hale getir.
+          # -----------------------------------------------------
+
+          lines = text.splitlines()
+
+          fixed = []
+
+          for line in lines:
+              stripped = line.strip()
+
+              if "p.put(" in stripped and "try {" not in stripped:
+                  indent = line[:len(line)-len(line.lstrip())]
+
+                  # Basit tek satırlık p.put()
+                  if stripped.endswith(";"):
+                      statement = stripped
+
+                      fixed.append(
+                          indent +
+                          "try { " +
+                          statement +
+                          " } catch (JSONException ignored) {}"
+                      )
+                      continue
+
+              fixed.append(line)
+
+          text = "\n".join(fixed) + "\n"
+
+          path.write_text(text, encoding="utf-8")
+
+          print("PredictionStore düzeltmesi uygulandı.")
+
+          PY
+
+      # =========================================================
+      # Dosyayı göster - hatanın gerçekten düzeldiğini kontrol et
+      # =========================================================
+
+      - name: Show PredictionStore
+        run: |
+          echo "========================================"
+          echo "PredictionStore.java"
+          echo "========================================"
+
+          sed -n '55,85p' \
+            project/app/src/main/java/com/bistaitrader/PredictionStore.java
+
+          echo "========================================"
 
       - name: Prepare Gradle
         working-directory: ${{ env.PROJECT_DIR }}
         run: |
           if [ -f "./gradlew" ]; then
             chmod +x ./gradlew
-            echo "Gradle wrapper bulundu."
-          else
-            echo "Gradle wrapper yok. Sistem Gradle kullanılacak."
           fi
 
-      - name: FIX PredictionStore JSONException
-        run: |
-          python3 <<'PY'
-          from pathlib import Path
-
-          files = list(Path("project").rglob("PredictionStore.java"))
-
-          if not files:
-              print("PredictionStore.java bulunamadı.")
-              raise SystemExit(1)
-
-          path = files[0]
-          print("Dosya:", path)
-
-          text = path.read_text(encoding="utf-8")
-
-          old = """        boolean changed=false;
-          for(int i=0;i<a.length();i++){JSONObject p=a.optJSONObject(i);if(p==null)continue;Double price=prices.get(p.optString("symbol"));if(price==null||price<=0)continue;double entry=p.optDouble("entry",0);if(entry<=0)continue;double ret=(price/entry-1)*100.0;p.put("lastQuote",price);p.put("lastQuoteTime",now);p.put("maxFavPct",Math.max(p.optDouble("maxFavPct",0),ret));p.put("maxAdvPct",Math.min(p.optDouble("maxAdvPct",0),ret));changed=true;}
-          if(changed)write("open",a);"""
-
-          new = """        boolean changed=false;
-          for(int i=0;i<a.length();i++){
-              try{
-                  JSONObject p=a.optJSONObject(i);
-                  if(p==null)continue;
-
-                  Double price=prices.get(p.optString("symbol"));
-                  if(price==null||price<=0)continue;
-
-                  double entry=p.optDouble("entry",0);
-                  if(entry<=0)continue;
-
-                  double ret=(price/entry-1)*100.0;
-
-                  p.put("lastQuote",price);
-                  p.put("lastQuoteTime",now);
-                  p.put("maxFavPct",Math.max(p.optDouble("maxFavPct",0),ret));
-                  p.put("maxAdvPct",Math.min(p.optDouble("maxAdvPct",0),ret));
-
-                  changed=true;
-              }catch(org.json.JSONException ignored){}
-          }
-
-          if(changed)write("open",a);"""
-
-          if old in text:
-              text = text.replace(old, new)
-              path.write_text(text, encoding="utf-8")
-              print("PredictionStore düzeltildi.")
-          else:
-              print("Eski blok bulunamadı.")
-              print("Dosya zaten düzeltilmiş olabilir.")
-
-          PY
-
-      - name: Verify source
-        run: |
-          echo "PredictionStore kontrol:"
-          grep -n "JSONException" \
-            project/app/src/main/java/com/bistaitrader/PredictionStore.java || true
-
-      - name: Clean project
+      - name: Clean
         working-directory: ${{ env.PROJECT_DIR }}
         run: |
           if [ -f "./gradlew" ]; then
-            ./gradlew clean --stacktrace
+            ./gradlew clean --stacktrace --no-daemon
           else
-            gradle clean --stacktrace
+            gradle clean --stacktrace --no-daemon
           fi
 
-      - name: Build Debug APK
+      - name: Build APK
         working-directory: ${{ env.PROJECT_DIR }}
         run: |
           if [ -f "./gradlew" ]; then
-            ./gradlew :app:assembleDebug --stacktrace --no-daemon
-          else
-            gradle :app:assembleDebug --stacktrace --no-daemon
-          fi
-
-      - name: Find APK
-        run: |
-          echo "APK files:"
-          find "${PROJECT_DIR}/app/build/outputs" \
-            -type f \
-            \( -name "*.apk" -o -name "*.aab" \) \
-            -print
-
-          if ! find "${PROJECT_DIR}/app/build/outputs" \
-            -type f -name "*.apk" | grep -q .; then
-            echo "APK oluşturulamadı!"
-            exit 1
-          fi
-
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: BIST-AI-Trader-V3.5-FIXED-APK
-          path: |
-            ${{ env.PROJECT_DIR }}/app/build/outputs/apk/debug/*.apk
-          if-no-files-found: error
-          retention-days: 30
+            ./gradlew :app:assembleDebug \
+             

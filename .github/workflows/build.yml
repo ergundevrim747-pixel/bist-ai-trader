@@ -1,0 +1,192 @@
+name: BIST AI Trader V3.9 - Adaptive AL FIXED
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - master
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Check uploaded ZIP
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          ZIP="BIST_AI_Trader_V3_9_ADAPTIVE_AL_FIXED.zip"
+
+          echo "Repository files:"
+          find . -maxdepth 2 -type f | sort
+
+          if [ ! -f "$ZIP" ]; then
+            echo "ERROR: $ZIP bulunamadı!"
+            echo "GitHub repository kök dizinindeki ZIP dosyalarını kontrol edin:"
+            find . -maxdepth 2 -type f -name "*.zip" -print
+            exit 1
+          fi
+
+          echo "ZIP bulundu:"
+          ls -lh "$ZIP"
+
+      - name: Extract Android project
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          ZIP="BIST_AI_Trader_V3_9_ADAPTIVE_AL_FIXED.zip"
+
+          rm -rf project
+          mkdir -p project
+
+          unzip -q "$ZIP" -d project
+
+          echo "Extracted project files:"
+          find project -maxdepth 3 -type f | sort | head -200
+
+          test -f project/settings.gradle
+          test -f project/build.gradle
+          test -f project/app/build.gradle
+
+          echo "Android project extracted successfully"
+
+      - name: Configure Android SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          export ANDROID_HOME="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          export ANDROID_SDK_ROOT="$ANDROID_HOME"
+
+          echo "ANDROID_HOME=$ANDROID_HOME"
+
+          if [ -x "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" ]; then
+            SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          elif [ -x "$ANDROID_HOME/cmdline-tools/16.0/bin/sdkmanager" ]; then
+            SDKMANAGER="$ANDROID_HOME/cmdline-tools/16.0/bin/sdkmanager"
+          elif command -v sdkmanager >/dev/null 2>&1; then
+            SDKMANAGER="$(command -v sdkmanager)"
+          else
+            echo "ERROR: sdkmanager bulunamadı"
+            exit 1
+          fi
+
+          echo "SDK manager: $SDKMANAGER"
+          "$SDKMANAGER" --version
+
+          yes | "$SDKMANAGER" --licenses >/dev/null 2>&1 || true
+
+          "$SDKMANAGER" \
+            "platform-tools" \
+            "platforms;android-35" \
+            "build-tools;35.0.0"
+
+          echo "Android SDK OK"
+
+      - name: Set up Gradle 8.9
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.9"
+
+      - name: Java source preflight
+        working-directory: project
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "Checking Java source..."
+
+          if grep -RIn --include='*.java' 'Locale\.TR' app/src/main/java; then
+            echo "ERROR: Locale.TR bulundu"
+            exit 1
+          fi
+
+          if grep -RIn --include='*.java' '%0\.2f' app/src/main/java; then
+            echo "ERROR: Geçersiz %0.2f bulundu"
+            exit 1
+          fi
+
+          test -f app/src/main/java/com/bistaitrader/PredictionStore.java
+
+          if ! grep -q 'putQuiet' app/src/main/java/com/bistaitrader/PredictionStore.java; then
+            echo "ERROR: PredictionStore.putQuiet bulunamadı"
+            exit 1
+          fi
+
+          if ! grep -q 'MarketGroups.matches(this' app/src/main/java/com/bistaitrader/MainActivity.java; then
+            echo "ERROR: MarketGroups.matches(this, ...) bulunamadı"
+            exit 1
+          fi
+
+          echo "Java preflight OK"
+
+      - name: Check MainActivity syntax area
+        working-directory: project
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          FILE="app/src/main/java/com/bistaitrader/MainActivity.java"
+
+          echo "MainActivity.java line count:"
+          wc -l "$FILE"
+
+          echo "MainActivity.java around previous error area:"
+          nl -ba "$FILE" | sed -n '300,345p'
+
+      - name: Build Debug APK
+        working-directory: project
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "Gradle version:"
+          gradle --version
+
+          echo "Starting clean build..."
+
+          gradle clean :app:assembleDebug \
+            --stacktrace \
+            --no-daemon \
+            --console=plain
+
+      - name: Verify APK
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          APK="project/app/build/outputs/apk/debug/app-debug.apk"
+
+          if [ ! -s "$APK" ]; then
+            echo "ERROR: APK oluşturulamadı!"
+            exit 1
+          fi
+
+          echo "APK başarıyla oluşturuldu:"
+          ls -lh "$APK"
+
+          echo "SHA256:"
+          sha256sum "$APK"
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: BIST-AI-Trader-V3.9-APK
+          path: project/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 30

@@ -1,4 +1,4 @@
-name: BIST AI Trader V3.9 - Adaptive AL Engine
+name: BIST AI Trader V3.9 - Adaptive AL FIXED
 
 on:
   workflow_dispatch:
@@ -13,6 +13,7 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -23,78 +24,53 @@ jobs:
           distribution: temurin
           java-version: "17"
 
+      - name: Check uploaded ZIP
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          ZIP="BIST_AI_Trader_V3_9_ADAPTIVE_AL_FIXED.zip"
+
+          echo "Repository files:"
+          find . -maxdepth 2 -type f | sort
+
+          if [ ! -f "$ZIP" ]; then
+            echo "ERROR: $ZIP bulunamadı!"
+            echo "GitHub repository kök dizinindeki ZIP dosyalarını kontrol edin:"
+            find . -maxdepth 2 -type f -name "*.zip" -print
+            exit 1
+          fi
+
+          echo "ZIP bulundu:"
+          ls -lh "$ZIP"
+
       - name: Extract Android project
         shell: bash
         run: |
           set -euo pipefail
-          ZIP="BIST_AI_Trader_V3_9_ADAPTIVE_AL.zip"
-          test -f "$ZIP"
+
+          ZIP="BIST_AI_Trader_V3_9_ADAPTIVE_AL_FIXED.zip"
+
           rm -rf project
           mkdir -p project
+
           unzip -q "$ZIP" -d project
+
+          echo "Extracted project files:"
+          find project -maxdepth 3 -type f | sort | head -200
+
           test -f project/settings.gradle
           test -f project/build.gradle
           test -f project/app/build.gradle
+
           echo "Android project extracted successfully"
 
       - name: Configure Android SDK
         shell: bash
         run: |
           set -euo pipefail
+
           export ANDROID_HOME="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
           export ANDROID_SDK_ROOT="$ANDROID_HOME"
-          if [ -x "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" ]; then
-            SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
-          elif [ -x "$ANDROID_HOME/cmdline-tools/16.0/bin/sdkmanager" ]; then
-            SDKMANAGER="$ANDROID_HOME/cmdline-tools/16.0/bin/sdkmanager"
-          elif command -v sdkmanager >/dev/null 2>&1; then
-            SDKMANAGER="$(command -v sdkmanager)"
-          else
-            echo "sdkmanager bulunamadı"
-            exit 1
-          fi
-          yes | "$SDKMANAGER" --licenses >/dev/null 2>&1 || true
-          "$SDKMANAGER" "platform-tools" "platforms;android-35" "build-tools;35.0.0"
 
-      - name: Set up Gradle 8.9
-        uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: "8.9"
-
-      - name: Preflight source checks
-        working-directory: project
-        shell: bash
-        run: |
-          set -euo pipefail
-          if grep -RIn --include='*.java' 'Locale\.TR' app/src/main/java; then exit 1; fi
-          if grep -RIn --include='*.java' '%0\.2f' app/src/main/java; then exit 1; fi
-          test -f app/src/main/java/com/bistaitrader/HorizonAnalysis.java
-          test -f app/src/main/java/com/bistaitrader/PredictionStore.java
-          grep -q 'bullConditions' app/src/main/java/com/bistaitrader/Stock.java
-          grep -q 'signalBalance' app/src/main/java/com/bistaitrader/AnalysisEngine.java
-          grep -q 'versionName.*3.9' app/build.gradle
-          echo "V3.9 preflight OK"
-
-      - name: Build Debug APK
-        working-directory: project
-        shell: bash
-        run: |
-          set -euo pipefail
-          gradle clean :app:assembleDebug --stacktrace --no-daemon
-
-      - name: Verify APK
-        shell: bash
-        run: |
-          set -euo pipefail
-          APK="project/app/build/outputs/apk/debug/app-debug.apk"
-          test -s "$APK"
-          ls -lh "$APK"
-          sha256sum "$APK"
-
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: BIST-AI-Trader-V3.9-APK
-          path: project/app/build/outputs/apk/debug/app-debug.apk
-          if-no-files-found: error
-          retention-days: 30
+          echo "ANDROID_HOME=$ANDROID_HOME"

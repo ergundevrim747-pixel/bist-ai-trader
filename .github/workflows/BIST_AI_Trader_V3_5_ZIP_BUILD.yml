@@ -1,4 +1,4 @@
-name: BIST AI Trader V3.5 - Compile Fix APK
+name: BIST AI Trader V3.5 - Runtime Fix APK
 
 on:
   workflow_dispatch:
@@ -16,16 +16,16 @@ jobs:
 
     steps:
 
-      # =========================================================
-      # 1 - GitHub Repository
-      # =========================================================
+      # ==========================================
+      # 1 - Repository
+      # ==========================================
       - name: Checkout repository
         uses: actions/checkout@v4
 
 
-      # =========================================================
+      # ==========================================
       # 2 - Java 17
-      # =========================================================
+      # ==========================================
       - name: Set up JDK 17
         uses: actions/setup-java@v5
         with:
@@ -33,17 +33,20 @@ jobs:
           java-version: "17"
 
 
-      # =========================================================
-      # 3 - ZIP dosyasını kontrol et ve aç
-      # =========================================================
+      # ==========================================
+      # 3 - Android projesini ZIP'ten çıkar
+      # ==========================================
       - name: Extract Android project
         shell: bash
         run: |
           set -euo pipefail
 
-          ZIP="BIST_AI_Trader_V3_5_COMPILE_FIX.zip"
+          ZIP="BIST_AI_Trader_V3_5_RUNTIME_FIX.zip"
 
-          echo "ZIP kontrol ediliyor..."
+          echo "=========================================="
+          echo "ZIP KONTROLÜ"
+          echo "=========================================="
+
           test -f "$ZIP"
 
           echo "ZIP bulundu:"
@@ -55,7 +58,7 @@ jobs:
           unzip -q "$ZIP" -d project
 
           echo ""
-          echo "Project içeriği:"
+          echo "Proje dosyaları:"
           find project -maxdepth 2 -type f | sort | head -100
 
           echo ""
@@ -65,12 +68,13 @@ jobs:
           test -f project/build.gradle
           test -f project/app/build.gradle
 
-          echo "Android project OK"
+          echo ""
+          echo "ANDROID PROJECT OK"
 
 
-      # =========================================================
+      # ==========================================
       # 4 - Android SDK
-      # =========================================================
+      # ==========================================
       - name: Configure Android SDK
         shell: bash
         run: |
@@ -84,22 +88,29 @@ jobs:
 
           if [ -x "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" ]; then
             SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+
           elif [ -x "$ANDROID_HOME/cmdline-tools/16.0/bin/sdkmanager" ]; then
             SDKMANAGER="$ANDROID_HOME/cmdline-tools/16.0/bin/sdkmanager"
+
           elif command -v sdkmanager >/dev/null 2>&1; then
             SDKMANAGER="$(command -v sdkmanager)"
+
           else
-            echo "sdkmanager bulunamadı."
+            echo "HATA: sdkmanager bulunamadı."
             exit 1
           fi
 
+          echo ""
           echo "Kullanılan sdkmanager:"
           echo "$SDKMANAGER"
 
           echo ""
-          echo "Gerekli Android paketleri kuruluyor..."
+          echo "Android lisansları kabul ediliyor..."
 
           yes | "$SDKMANAGER" --licenses >/dev/null 2>&1 || true
+
+          echo ""
+          echo "Gerekli Android paketleri kuruluyor..."
 
           "$SDKMANAGER" \
             "platform-tools" \
@@ -107,82 +118,82 @@ jobs:
             "build-tools;35.0.0"
 
           echo ""
-          echo "Android SDK hazır."
+          echo "ANDROID SDK OK"
 
 
-      # =========================================================
+      # ==========================================
       # 5 - Gradle 8.9
-      # =========================================================
+      # ==========================================
       - name: Set up Gradle 8.9
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "8.9"
 
 
-      # =========================================================
-      # 6 - Java kaynak kodu kontrolü
-      # =========================================================
+      # ==========================================
+      # 6 - Java kaynak kontrolü
+      # ==========================================
       - name: Java source preflight
         working-directory: project
         shell: bash
         run: |
           set -euo pipefail
 
-          echo "Java kaynakları kontrol ediliyor..."
+          echo "=========================================="
+          echo "JAVA KAYNAK KONTROLÜ"
+          echo "=========================================="
 
           echo ""
-          echo "PredictionStore:"
-          test -f app/src/main/java/com/bistaitrader/PredictionStore.java
-          echo "PredictionStore.java bulundu."
+          echo "Locale.TR kontrolü..."
 
-          echo ""
-          echo "Locale.TR kontrolü:"
           if grep -RIn --include='*.java' 'Locale\.TR' app/src/main/java; then
             echo "HATA: Locale.TR bulundu."
             exit 1
           fi
 
-          echo "Locale.TR bulunamadı."
+          echo "OK - Locale.TR bulunamadı."
 
           echo ""
-          echo "putQuiet kontrolü:"
+          echo "PredictionStore kontrolü..."
+
+          test -f \
+            app/src/main/java/com/bistaitrader/PredictionStore.java
+
           grep -q 'putQuiet' \
             app/src/main/java/com/bistaitrader/PredictionStore.java
 
-          echo "putQuiet bulundu."
+          echo "OK - PredictionStore."
 
           echo ""
+          echo "MainActivity kontrolü..."
+
+          test -f \
+            app/src/main/java/com/bistaitrader/MainActivity.java
+
           echo "MarketGroups.matches kullanımları:"
-          grep -RIn 'MarketGroups\.matches' \
-            app/src/main/java || true
+          grep -n "MarketGroups.matches" \
+            app/src/main/java/com/bistaitrader/MainActivity.java || true
 
           echo ""
-          echo "Java preflight OK"
+          echo "Format kontrolü..."
 
+          if grep -RIn --include='*.java' '%0\.2f' app/src/main/java; then
+            echo "HATA: Geçersiz %0.2f formatı bulundu."
+            exit 1
+          fi
 
-      # =========================================================
-      # 7 - PredictionStore kontrolü
-      # =========================================================
-      - name: Verify PredictionStore fix
-        working-directory: project
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          FILE="app/src/main/java/com/bistaitrader/PredictionStore.java"
-
-          echo "PredictionStore.java kontrol ediliyor..."
-
-          grep -n "pnlSet" "$FILE" | head -30 || true
+          echo "OK - %0.2f bulunamadı."
 
           echo ""
-          echo "PredictionStore kontrolü tamamlandı."
+          echo "=========================================="
+          echo "JAVA PREFLIGHT OK"
+          echo "=========================================="
 
 
-      # =========================================================
-      # 8 - MainActivity MarketGroups kontrolü
-      # =========================================================
-      - name: Verify MainActivity fix
+      # ==========================================
+      # 7 - Runtime format kontrolü
+      # ==========================================
+      - name: Verify runtime format fix
         working-directory: project
         shell: bash
         run: |
@@ -190,35 +201,37 @@ jobs:
 
           FILE="app/src/main/java/com/bistaitrader/MainActivity.java"
 
-          echo "MarketGroups.matches çağrıları:"
-
-          grep -n "MarketGroups.matches" "$FILE" || true
+          echo "MainActivity formatları:"
+          grep -nE 'String\.format|%.2f|%[0-9.]*f' "$FILE" || true
 
           echo ""
-          echo "MainActivity kontrolü tamamlandı."
+          echo "Runtime format kontrolü tamamlandı."
 
 
-      # =========================================================
-      # 9 - Gradle temizleme
-      # =========================================================
+      # ==========================================
+      # 8 - Gradle Clean
+      # ==========================================
       - name: Clean project
         working-directory: project
         shell: bash
         run: |
           set -euo pipefail
 
-          echo "Gradle clean başlıyor..."
+          echo "=========================================="
+          echo "GRADLE CLEAN"
+          echo "=========================================="
 
           gradle clean \
             --stacktrace \
             --no-daemon
 
-          echo "Clean tamamlandı."
+          echo ""
+          echo "CLEAN OK"
 
 
-      # =========================================================
-      # 10 - APK BUILD
-      # =========================================================
+      # ==========================================
+      # 9 - Debug APK Build
+      # ==========================================
       - name: Build Debug APK
         working-directory: project
         shell: bash
@@ -226,7 +239,8 @@ jobs:
           set -euo pipefail
 
           echo "=========================================="
-          echo "BIST AI Trader APK BUILD BAŞLIYOR"
+          echo "BIST AI TRADER V3.5"
+          echo "APK BUILD BAŞLIYOR"
           echo "=========================================="
 
           gradle :app:assembleDebug \
@@ -239,9 +253,9 @@ jobs:
           echo "=========================================="
 
 
-      # =========================================================
-      # 11 - APK kontrol
-      # =========================================================
+      # ==========================================
+      # 10 - APK kontrol
+      # ==========================================
       - name: Verify APK
         shell: bash
         run: |
@@ -249,7 +263,7 @@ jobs:
 
           APK="project/app/build/outputs/apk/debug/app-debug.apk"
 
-          echo "APK aranıyor..."
+          echo "APK kontrol ediliyor..."
 
           test -f "$APK"
           test -s "$APK"
@@ -262,29 +276,30 @@ jobs:
           ls -lh "$APK"
 
           echo ""
-          echo "APK SHA256:"
+          echo "SHA256:"
           sha256sum "$APK"
 
 
-      # =========================================================
-      # 12 - APK artifact olarak yükle
-      # =========================================================
+      # ==========================================
+      # 11 - APK Artifact
+      # ==========================================
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: BIST-AI-Trader-V3.5-COMPILE-FIX-APK
+          name: BIST-AI-Trader-V3.5-RUNTIME-FIX-APK
           path: project/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 30
 
 
-      # =========================================================
-      # 13 - Build sonuçlarını göster
-      # =========================================================
+      # ==========================================
+      # 12 - Başarılı build özeti
+      # ==========================================
       - name: Build summary
         if: success()
         shell: bash
         run: |
+          echo ""
           echo "=========================================="
           echo "BIST AI TRADER V3.5"
           echo "BUILD BAŞARILI"
@@ -293,5 +308,8 @@ jobs:
           echo "APK:"
           echo "app-debug.apk"
           echo ""
+          echo "Artifact:"
+          echo "BIST-AI-Trader-V3.5-RUNTIME-FIX-APK"
+          echo ""
           echo "GitHub Actions > Artifacts bölümünden"
-          echo "APK dosyasını indirebilirsin."
+          echo "APK'yı indirebilirsin."

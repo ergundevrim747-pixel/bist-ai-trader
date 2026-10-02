@@ -1,586 +1,143 @@
-name: Build BIST AI Trader V5
+name: Build BIST AI Trader v5.1 - Signal Balance Fix
 
 on:
   workflow_dispatch:
   push:
     paths:
-      - "**/*.zip"
-      - ".github/workflows/**"
-      - "project/**"
+      - '**/*.zip'
+      - '.github/workflows/**'
+      - 'project/**'
+
+permissions:
+  contents: read
 
 jobs:
   build:
     runs-on: ubuntu-latest
-
     steps:
-
-      # ==================================================
-      # 1. CHECKOUT
-      # ==================================================
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
 
-
-      # ==================================================
-      # 2. FIND AND EXTRACT ANDROID PROJECT
-      # ==================================================
-      - name: Find and extract Android project
+      - name: Locate and extract Android project
         shell: bash
         run: |
           set -euo pipefail
+          rm -rf project extracted_bundle
+          mkdir -p project extracted_bundle
 
-          echo "========================================"
-          echo "REPOSITORY CONTENTS"
-          echo "========================================"
-
-          find . -maxdepth 4 -type f | sort
-
-          echo ""
-          echo "========================================"
-          echo "SEARCHING ANDROID PROJECT"
-          echo "========================================"
-
-          # ------------------------------------------------
-          # PROJECT ALREADY EXISTS
-          # ------------------------------------------------
-
-          if [ -f "app/build.gradle" ]; then
-
-            echo "Android project found in repository root."
+          if [ -f app/build.gradle ]; then
             echo "WORKDIR=." >> "$GITHUB_ENV"
             exit 0
-
           fi
 
-
-          if [ -f "project/app/build.gradle" ]; then
-
-            echo "Android project found in project/."
+          if [ -f project/app/build.gradle ]; then
             echo "WORKDIR=project" >> "$GITHUB_ENV"
             exit 0
-
           fi
 
+          ZIP="$(find . -maxdepth 1 -type f -iname 'BIST_AI_Trader_V5_ALL_FEATURES*.zip' | sort | head -n1 || true)"
+          if [ -z "$ZIP" ]; then
+            echo "ERROR: V5 ZIP bulunamadı."
+            find . -maxdepth 2 -type f -name '*.zip' -print
+            exit 1
+          fi
 
-          # ------------------------------------------------
-          # SEARCH ALL ZIP FILES
-          # ------------------------------------------------
+          echo "Outer archive: $ZIP"
+          unzip -q "$ZIP" -d extracted_bundle
 
-          echo "Android project not extracted."
-          echo "Searching ZIP files..."
-
-          mkdir -p /tmp/bist_zip_extract
-
-          ZIP_FILE=""
-
-          while IFS= read -r file; do
-            if [ -f "$file" ]; then
-              echo "ZIP candidate: $file"
-              ZIP_FILE="$file"
-              break
+          if [ -f extracted_bundle/settings.gradle ] && [ -f extracted_bundle/app/build.gradle ]; then
+            cp -a extracted_bundle/. project/
+          else
+            INNER="$(find extracted_bundle -type f -iname 'BIST_AI_Trader_V5_ALL_FEATURES*.zip' | sort | head -n1 || true)"
+            if [ -z "$INNER" ]; then
+              echo "ERROR: Outer bundle içinde Android proje ZIP'i bulunamadı."
+              find extracted_bundle -maxdepth 4 -type f -print
+              exit 1
             fi
-          done < <(find . -type f -name "*.zip" | sort)
-
-
-          if [ -z "$ZIP_FILE" ]; then
-
-            echo ""
-            echo "ERROR: ZIP dosyası bulunamadı."
-            exit 1
-
+            echo "Inner project archive: $INNER"
+            unzip -q "$INNER" -d project
           fi
 
-
-          echo ""
-          echo "Selected ZIP:"
-          echo "$ZIP_FILE"
-
-
-          # ------------------------------------------------
-          # EXTRACT FIRST ZIP
-          # ------------------------------------------------
-
-          rm -rf project
-          mkdir -p project
-
-          echo ""
-          echo "Extracting first ZIP..."
-
-          unzip -q "$ZIP_FILE" -d project
-
-
-          echo ""
-          echo "First ZIP contents:"
-
-          find project -maxdepth 6 -type f | sort
-
-
-          # ------------------------------------------------
-          # CHECK DIRECT PROJECT
-          # ------------------------------------------------
-
-          if [ -f "project/app/build.gradle" ]; then
-
-            echo ""
-            echo "Android project found after first extraction."
-
-            echo "WORKDIR=project" >> "$GITHUB_ENV"
-
-            exit 0
-
-          fi
-
-
-          # ------------------------------------------------
-          # FIND NESTED ZIP
-          # ------------------------------------------------
-
-          echo ""
-          echo "No direct Android project."
-          echo "Searching nested ZIP files..."
-
-
-          NESTED_ZIP=""
-
-          while IFS= read -r file; do
-
-            if [ -f "$file" ]; then
-
-              echo "Nested ZIP candidate: $file"
-
-              NESTED_ZIP="$file"
-
-              break
-
-            fi
-
-          done < <(find project -type f -name "*.zip" | sort)
-
-
-          if [ -z "$NESTED_ZIP" ]; then
-
-            echo ""
-            echo "ERROR: Nested ZIP bulunamadı."
-
-            echo ""
-            echo "Current project contents:"
-
-            find project -maxdepth 8 -type f | sort
-
-            exit 1
-
-          fi
-
-
-          echo ""
-          echo "Selected nested ZIP:"
-          echo "$NESTED_ZIP"
-
-
-          # ------------------------------------------------
-          # EXTRACT NESTED ZIP
-          # ------------------------------------------------
-
-          rm -rf /tmp/bist_nested
-          mkdir -p /tmp/bist_nested
-
-          echo ""
-          echo "Extracting nested ZIP..."
-
-          unzip -q "$NESTED_ZIP" -d /tmp/bist_nested
-
-
-          echo ""
-          echo "Nested ZIP contents:"
-
-          find /tmp/bist_nested -maxdepth 8 -type f | sort
-
-
-          # ------------------------------------------------
-          # FIND app/build.gradle
-          # ------------------------------------------------
-
-          BUILD_FILE=$(find /tmp/bist_nested \
-            -type f \
-            -path "*/app/build.gradle" \
-            | head -n 1 || true)
-
-
-          if [ -z "$BUILD_FILE" ]; then
-
-            echo ""
-            echo "ERROR: Nested ZIP içerisinde app/build.gradle bulunamadı."
-
-            echo ""
-            echo "Nested ZIP içeriği:"
-
-            find /tmp/bist_nested \
-              -maxdepth 10 \
-              -type f \
-              | sort
-
-            exit 1
-
-          fi
-
-
-          echo ""
-          echo "Android build.gradle found:"
-          echo "$BUILD_FILE"
-
-
-          # ------------------------------------------------
-          # DETERMINE PROJECT ROOT
-          # ------------------------------------------------
-
-          PROJECT_ROOT=$(dirname "$(dirname "$BUILD_FILE")")
-
-
-          echo ""
-          echo "Detected Android project:"
-          echo "$PROJECT_ROOT"
-
-
-          # ------------------------------------------------
-          # COPY PROJECT TO project/
-          # ------------------------------------------------
-
-          rm -rf project
-
-          mkdir -p project
-
-
-          echo ""
-          echo "Copying Android project..."
-
-
-          cp -a "$PROJECT_ROOT"/. project/
-
-
-          # ------------------------------------------------
-          # FINAL CHECK
-          # ------------------------------------------------
-
-          echo ""
-          echo "Final project structure:"
-
-          find project -maxdepth 5 -type f | sort
-
-
-          if [ ! -f "project/app/build.gradle" ]; then
-
-            echo ""
-            echo "ERROR: Final project içinde app/build.gradle bulunamadı."
-            exit 1
-
-          fi
-
-
-          if [ ! -f "project/settings.gradle" ]; then
-
-            echo ""
-            echo "ERROR: Final project içinde settings.gradle bulunamadı."
-            exit 1
-
-          fi
-
-
-          echo ""
-          echo "Android project successfully prepared."
-
+          test -f project/settings.gradle
+          test -f project/build.gradle
+          test -f project/app/build.gradle
+          test -f project/app/src/main/AndroidManifest.xml
           echo "WORKDIR=project" >> "$GITHUB_ENV"
+          echo "Android project located successfully."
 
-
-      # ==================================================
-      # 3. JAVA 17
-      # ==================================================
       - name: Setup Java 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: "17"
+          java-version: '17'
+          cache: gradle
 
-
-      # ==================================================
-      # 4. CHECK JAVA
-      # ==================================================
-      - name: Check Java
+      - name: Configure Android SDK
         shell: bash
         run: |
           set -euo pipefail
-
-          echo "JAVA_HOME=$JAVA_HOME"
-
-          java -version
-
-
-      # ==================================================
-      # 5. ANDROID SDK
-      # ==================================================
-      - name: Setup Android SDK
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          echo "========================================"
-          echo "ANDROID SDK"
-          echo "========================================"
-
-          SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
-
-          echo "SDK_ROOT=$SDK_ROOT"
-
-
-          SDKMANAGER=""
-
-
-          if [ -n "$SDK_ROOT" ] && \
-             [ -x "$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" ]; then
-
-            SDKMANAGER="$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
-
+          export ANDROID_HOME="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          export ANDROID_SDK_ROOT="$ANDROID_HOME"
+          if [ -x "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" ]; then
+            SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          elif [ -x "$ANDROID_HOME/cmdline-tools/16.0/bin/sdkmanager" ]; then
+            SDKMANAGER="$ANDROID_HOME/cmdline-tools/16.0/bin/sdkmanager"
+          elif command -v sdkmanager >/dev/null 2>&1; then
+            SDKMANAGER="$(command -v sdkmanager)"
+          else
+            SDKMANAGER="$(find "$ANDROID_HOME" -type f -path '*/cmdline-tools/*/bin/sdkmanager' 2>/dev/null | sort | tail -n1 || true)"
           fi
-
-
-          if [ -z "$SDKMANAGER" ]; then
-
-            SDKMANAGER=$(find "$SDK_ROOT" \
-              -type f \
-              -name "sdkmanager" \
-              2>/dev/null \
-              | head -n 1 || true)
-
-          fi
-
-
-          if [ -z "$SDKMANAGER" ]; then
-
-            SDKMANAGER=$(command -v sdkmanager || true)
-
-          fi
-
-
-          if [ -z "$SDKMANAGER" ]; then
-
-            echo ""
+          if [ -z "${SDKMANAGER:-}" ] || [ ! -x "$SDKMANAGER" ]; then
             echo "ERROR: sdkmanager bulunamadı."
             exit 1
-
           fi
+          echo "Using sdkmanager: $SDKMANAGER"
+          yes | "$SDKMANAGER" --licenses >/dev/null 2>&1 || true
+          "$SDKMANAGER" "platform-tools" "platforms;android-35" "build-tools;35.0.0"
 
-
-          echo ""
-          echo "Using sdkmanager:"
-          echo "$SDKMANAGER"
-
-
-          echo ""
-          echo "Accepting Android licenses..."
-
-          yes | "$SDKMANAGER" --licenses \
-            >/dev/null 2>&1 || true
-
-
-          echo ""
-          echo "Installing Android SDK packages..."
-
-
-          "$SDKMANAGER" \
-            "platform-tools" \
-            "platforms;android-35" \
-            "build-tools;35.0.0"
-
-
-          echo ""
-          echo "Android SDK ready."
-
-
-      # ==================================================
-      # 6. GRADLE 8.9
-      # ==================================================
       - name: Setup Gradle 8.9
         uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: "8.9"
+          gradle-version: '8.9'
 
-
-      # ==================================================
-      # 7. PREFLIGHT
-      # ==================================================
-      - name: Project Preflight
+      - name: Java source preflight
         shell: bash
         run: |
           set -euo pipefail
-
-          echo "========================================"
-          echo "PROJECT PREFLIGHT"
-          echo "========================================"
-
           cd "$WORKDIR"
-
-
-          echo ""
-          echo "WORKDIR:"
-          pwd
-
-
-          echo ""
-          echo "PROJECT FILES:"
-
-          find . -maxdepth 5 -type f | sort
-
-
-          echo ""
-          echo "Checking settings.gradle..."
-
           test -f settings.gradle
-
-          echo "OK"
-
-
-          echo ""
-          echo "Checking app/build.gradle..."
-
           test -f app/build.gradle
-
-          echo "OK"
-
-
-          echo ""
-          echo "Checking AndroidManifest.xml..."
-
           test -f app/src/main/AndroidManifest.xml
+          grep -q "versionName '5.1'" app/build.gradle
+          test -f app/src/main/java/com/bistaitrader/AnalysisEngine.java
+          test -f app/src/main/java/com/bistaitrader/PredictionStore.java
+          grep -q 'int w=0,l=0' app/src/main/java/com/bistaitrader/PredictionStore.java
+          grep -q 'decisionWhy' app/src/main/java/com/bistaitrader/AnalysisEngine.java
+          grep -q 'AL ADAYI' app/src/main/java/com/bistaitrader/AnalysisEngine.java
+          grep -q 'NEDEN ' app/src/main/java/com/bistaitrader/MainActivity.java
+          if grep -RIn --include='*.java' 'Locale\.TR' app/src/main/java; then exit 1; fi
+          if grep -RIn --include='*.java' '%0\.2f' app/src/main/java; then exit 1; fi
+          echo "Java preflight OK"
 
-          echo "OK"
-
-
-          echo ""
-          echo "Version information:"
-
-          grep -n "versionName" app/build.gradle || true
-
-          grep -n "versionCode" app/build.gradle || true
-
-
-          echo ""
-          echo "PREFLIGHT SUCCESS."
-
-
-      # ==================================================
-      # 8. GRADLE VERSION
-      # ==================================================
-      - name: Check Gradle
+      - name: Build debug APK
         shell: bash
         run: |
           set -euo pipefail
-
-          gradle --version
-
-
-      # ==================================================
-      # 9. CLEAN
-      # ==================================================
-      - name: Clean project
-        shell: bash
-        run: |
-          set -euo pipefail
-
           cd "$WORKDIR"
+          gradle clean :app:assembleDebug --stacktrace --no-daemon --console=plain
 
-          gradle \
-            --no-daemon \
-            clean
-
-
-      # ==================================================
-      # 10. BUILD APK
-      # ==================================================
-      - name: Build Debug APK
+      - name: Verify APK
         shell: bash
         run: |
           set -euo pipefail
+          APK="$WORKDIR/app/build/outputs/apk/debug/app-debug.apk"
+          test -s "$APK"
+          ls -lh "$APK"
 
-          cd "$WORKDIR"
-
-          echo "========================================"
-          echo "BUILDING BIST AI TRADER V5"
-          echo "========================================"
-
-
-          gradle \
-            --no-daemon \
-            --stacktrace \
-            assembleDebug
-
-
-      # ==================================================
-      # 11. CHECK APK
-      # ==================================================
-      - name: Check APK
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          echo "========================================"
-          echo "APK OUTPUT"
-          echo "========================================"
-
-
-          find "$WORKDIR/app/build/outputs" \
-            -type f \
-            -name "*.apk" \
-            -exec ls -lh {} \;
-
-
-          APK_COUNT=$(find "$WORKDIR/app/build/outputs" \
-            -type f \
-            -name "*.apk" \
-            | wc -l)
-
-
-          if [ "$APK_COUNT" -eq 0 ]; then
-
-            echo ""
-            echo "ERROR: APK üretilemedi."
-
-            exit 1
-
-          fi
-
-
-          echo ""
-          echo "APK_COUNT=$APK_COUNT"
-
-
-      # ==================================================
-      # 12. UPLOAD APK
-      # ==================================================
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: BIST_AI_Trader_V5_DEBUG
-          path: ${{ env.WORKDIR }}/app/build/outputs/apk/debug/*.apk
+          name: BIST_AI_Trader_v5_1_signal_balance_fix_debug
+          path: ${{ env.WORKDIR }}/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
-
-
-      # ==================================================
-      # 13. FINAL SUMMARY
-      # ==================================================
-      - name: Build Summary
-        if: always()
-        shell: bash
-        run: |
-          echo "========================================"
-          echo "BIST AI TRADER V5 BUILD SUMMARY"
-          echo "========================================"
-
-          echo "WORKDIR=${WORKDIR:-unknown}"
-
-          echo ""
-          echo "Generated APK files:"
-
-          find "${WORKDIR:-project}/app/build/outputs" \
-            -type f \
-            -name "*.apk" \
-            -exec ls -lh {} \; \
-            2>/dev/null || true
+          retention-days: 30
